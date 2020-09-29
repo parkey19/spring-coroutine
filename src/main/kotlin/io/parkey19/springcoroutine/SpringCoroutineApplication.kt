@@ -3,12 +3,15 @@ package io.parkey19.springcoroutine
 import com.fasterxml.jackson.annotation.JsonCreator
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.fasterxml.jackson.annotation.JsonTypeInfo
+import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.module.kotlin.KotlinModule
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.runBlocking
 import org.springframework.boot.ApplicationRunner
 import org.springframework.boot.autoconfigure.SpringBootApplication
+import org.springframework.boot.autoconfigure.domain.EntityScan
 import org.springframework.boot.runApplication
-import org.springframework.cache.CacheManager
 import org.springframework.cache.annotation.Cacheable
 import org.springframework.cache.annotation.CachingConfigurerSupport
 import org.springframework.cache.annotation.EnableCaching
@@ -24,14 +27,17 @@ import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactor
 import org.springframework.data.redis.serializer.GenericJackson2JsonRedisSerializer
 import org.springframework.data.redis.serializer.RedisSerializationContext
 import org.springframework.data.redis.serializer.StringRedisSerializer
+import org.springframework.http.MediaType
 import org.springframework.kotlin.coroutine.EnableCoroutine
 import org.springframework.kotlin.coroutine.annotation.Coroutine
 import org.springframework.kotlin.coroutine.context.DEFAULT_DISPATCHER
+import org.springframework.stereotype.Component
 import org.springframework.stereotype.Repository
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.RestController
 import org.springframework.web.reactive.function.client.WebClient
+import org.springframework.web.reactive.function.server.*
 import java.io.Serializable
 import java.time.Duration
 
@@ -50,41 +56,75 @@ class UserConfiguration {
     }
 }
 
-@RestController
-class UserWithDetailsController(
-        private val userRepository: UserRepository,
-        private val cacheManager: RedisCacheManager?
+@Component
+open class UserHandler(
+        private val userRepository: UserRepository
 ) {
 
-    @GetMapping("/")
-    fun findAll(): Flow<User> =
-            userRepository.findAll()
+    @Cacheable("Users")
+    suspend open fun findOne(request: ServerRequest): ServerResponse =
+        ServerResponse.ok()
+                .json()
+                .bodyValueAndAwait( userRepository.findOne(request.pathVariable("id"))?.render() ?: UserDto(0L, "0", 0))
 
-    @GetMapping("/{id}")
-    @Cacheable("UserCache")
-//    @Cacheable(value = ["UserDto"], unless="#User == null", cacheManager = "cacheManager")
-    suspend open fun findOne(@PathVariable id: String): UserDto {
-        val user: User = userRepository.findOne(id) ?:
-        throw CustomException("This user does not exist")
-        return user.render()
-    }
 
     fun User.render() = UserDto(id, name, age)
 }
 
+//@RestController
+//class UserWithDetailsController(
+//        private val userRepository: UserRepository,
+//        private val userdetailsService: UserWithDetailsService
+//) {
+//
+//    @GetMapping("/")
+//    fun findAll(): Flow<User> =
+//            userRepository.findAll()
+//
+//    @GetMapping("/{id}")
+////    @Cacheable("UserCache")
+////    @Cacheable(value = ["UserDto"], unless="#User == null", cacheManager = "cacheManager")
+//    suspend fun findOne(@PathVariable id: String): UserDto {
+////        val user: User = userRepository.findOne(id) ?:
+////        throw CustomException("This user does not exist")
+////        return user.render()
+//        return userdetailsService.findOne(id)
+//    }
+//
+//    fun User.render() = UserDto(id, name, age)
+//}
+
+@Configuration
+open class ProductRouter(private val handler: UserHandler) {
+    @Bean
+    fun route() = coRouter {
+        "/".nest {
+            accept(MediaType.APPLICATION_JSON).nest {
+                GET("/{id}", handler::findOne)
+            }
+        }
+    }
+}
+
 class CustomException(s: String) : Throwable(s)
 
-data class User(@Id val id: Long, val name: String, val age: Int)
-
-@JsonTypeInfo(use = JsonTypeInfo.Id.CLASS)
-data class UserDto @JsonCreator constructor(
+data class User (
         @JsonProperty("id")
         val id: Long,
         @JsonProperty("name")
         val name: String,
         @JsonProperty("age")
         val age: Int
-) : Serializable
+)
+
+data class UserDto (
+        @JsonProperty("id")
+        val id: Long,
+        @JsonProperty("name")
+        val name: String,
+        @JsonProperty("age")
+        val age: Int
+)
 
 @Repository
 class UserRepository(private val client: DatabaseClient) {
@@ -96,6 +136,7 @@ class UserRepository(private val client: DatabaseClient) {
     fun findAll(): Flow<User> =
             client.select().from("user").asType<User>().fetch().flow()
 
+//    @Cacheable(value=["User"], unless = "#result == null")
     suspend fun findOne(id: String): User? =
             client.execute("SELECT * FROM user WHERE id = :id")
                     .bind("id", id).asType<User>()
@@ -123,11 +164,12 @@ class UserRepository(private val client: DatabaseClient) {
 class RedisConfigration : CachingConfigurerSupport() {
     @Bean
     fun cacheManager(connectionFactory: RedisConnectionFactory): RedisCacheManager? {
+        val objectMapper = ObjectMapper().registerModule(KotlinModule())
         val builder = RedisCacheManager.RedisCacheManagerBuilder.fromConnectionFactory(connectionFactory)
         val configuration = RedisCacheConfiguration.defaultCacheConfig()
                 .disableCachingNullValues()
                 .serializeKeysWith(RedisSerializationContext.SerializationPair.fromSerializer(StringRedisSerializer()))
-                .serializeValuesWith(RedisSerializationContext.SerializationPair.fromSerializer(GenericJackson2JsonRedisSerializer()))
+                .serializeValuesWith(RedisSerializationContext.SerializationPair.fromSerializer(GenericJackson2JsonRedisSerializer(objectMapper)))
                 .computePrefixWith(CacheKeyPrefix.simple())
                 .entryTtl(Duration.ofMinutes(5L))
         builder.cacheDefaults(configuration)
