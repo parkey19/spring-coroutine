@@ -9,5 +9,5 @@
 These references should also help you:
 
 * [spring-boot-kotlin-coroutines](https://www.baeldung.com/spring-boot-kotlin-coroutines)
-* [kotlin-coroutine-lib](https://github.com/konrad-kaminski/spring-kotlin-coroutine)
+* [spring-kotlin-coroutine-lib](https://github.com/konrad-kaminski/spring-kotlin-coroutine)
 
