@@ -31,6 +31,8 @@ dependencies {
     implementation("com.fasterxml.jackson.module:jackson-module-kotlin")
     implementation("io.projectreactor.kotlin:reactor-kotlin-extensions")
     implementation("org.springframework.kotlin:spring-kotlin-coroutine:0.3.7")
+    implementation("org.springframework.kotlin:spring-webflux-kotlin-coroutine:0.3.7")
+    
     implementation("org.jetbrains.kotlin:kotlin-reflect")
     implementation("org.jetbrains.kotlin:kotlin-stdlib-jdk8")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core")
